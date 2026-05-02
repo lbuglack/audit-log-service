@@ -2,7 +2,6 @@ package com.auditlog.service;
 
 import com.auditlog.dto.request.CreateAuditEventRequest;
 import com.auditlog.dto.response.AuditEventResponse;
-
 import java.time.Instant;
 import java.util.List;
 

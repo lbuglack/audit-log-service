@@ -6,14 +6,13 @@ import com.auditlog.dto.request.CreateAuditEventRequest;
 import com.auditlog.dto.response.AuditEventResponse;
 import com.auditlog.service.AuditEventService;
 import jakarta.persistence.criteria.Predicate;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -48,9 +47,7 @@ public class AuditEventServiceImpl implements AuditEventService {
             return cb.and(predicates.toArray(new Predicate[0]));
         };
 
-        return auditEventRepository.findAll(spec).stream()
-                .map(this::toResponse)
-                .toList();
+        return auditEventRepository.findAll(spec).stream().map(this::toResponse).toList();
     }
 
     private AuditEventResponse toResponse(AuditEventEntity entity) {
@@ -61,7 +58,6 @@ public class AuditEventServiceImpl implements AuditEventService {
                 entity.getAction(),
                 entity.getResource(),
                 entity.getOutcome(),
-                entity.getContext()
-        );
+                entity.getContext());
     }
 }

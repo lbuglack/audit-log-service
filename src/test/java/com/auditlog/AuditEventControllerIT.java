@@ -1,19 +1,18 @@
 package com.auditlog;
 
-import com.auditlog.dao.repository.AuditEventRepository;
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.auditlog.dto.request.CreateAuditEventRequest;
 import com.auditlog.dto.response.AuditEventResponse;
+import java.time.Instant;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-
-import java.time.Instant;
-import java.util.Map;
-
-import static org.assertj.core.api.Assertions.assertThat;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class AuditEventControllerIT extends AbstractIntegrationTest {
 
@@ -21,11 +20,13 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
     private TestRestTemplate restTemplate;
 
     @Autowired
-    private AuditEventRepository repository;
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void cleanup() {
-        repository.deleteAll();
+        jdbcTemplate.execute("ALTER TABLE audit_events DISABLE TRIGGER ALL");
+        jdbcTemplate.execute("TRUNCATE audit_events");
+        jdbcTemplate.execute("ALTER TABLE audit_events ENABLE TRIGGER ALL");
     }
 
     // --- POST /audit-events ---
@@ -33,9 +34,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
     @Test
     void create_allFields_returns201WithPersistedEvent() {
         var request = new CreateAuditEventRequest(
-                "user:42", "resource.updated", "project:1", "success",
-                Map.of("ip", "127.0.0.1", "changes", "title")
-        );
+                "user:42", "resource.updated", "project:1", "success", Map.of("ip", "127.0.0.1", "changes", "title"));
 
         var response = restTemplate.postForEntity("/audit-events", request, AuditEventResponse.class);
 
@@ -72,7 +71,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
 
     @Test
     void create_allOutcomeValues_areAccepted() {
-        for (String outcome : new String[]{"success", "denied", "error"}) {
+        for (String outcome : new String[] {"success", "denied", "error"}) {
             var request = new CreateAuditEventRequest("user:1", "login", "session", outcome, null);
             var response = restTemplate.postForEntity("/audit-events", request, AuditEventResponse.class);
             assertThat(response.getStatusCode())
@@ -86,10 +85,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
     @Test
     void create_missingActor_returns400() {
         var response = restTemplate.postForEntity(
-                "/audit-events",
-                Map.of("action", "login", "resource", "session", "outcome", "success"),
-                Object.class
-        );
+                "/audit-events", Map.of("action", "login", "resource", "session", "outcome", "success"), Object.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
@@ -103,30 +99,21 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
     @Test
     void create_missingAction_returns400() {
         var response = restTemplate.postForEntity(
-                "/audit-events",
-                Map.of("actor", "user:1", "resource", "session", "outcome", "success"),
-                Object.class
-        );
+                "/audit-events", Map.of("actor", "user:1", "resource", "session", "outcome", "success"), Object.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
     void create_missingResource_returns400() {
         var response = restTemplate.postForEntity(
-                "/audit-events",
-                Map.of("actor", "user:1", "action", "login", "outcome", "success"),
-                Object.class
-        );
+                "/audit-events", Map.of("actor", "user:1", "action", "login", "outcome", "success"), Object.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
     void create_missingOutcome_returns400() {
         var response = restTemplate.postForEntity(
-                "/audit-events",
-                Map.of("actor", "user:1", "action", "login", "resource", "session"),
-                Object.class
-        );
+                "/audit-events", Map.of("actor", "user:1", "action", "login", "resource", "session"), Object.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
@@ -156,12 +143,9 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:42", "resource.updated", "project:1", "success");
         createEvent("user:99", "login", "session", "denied");
 
-        var results = restTemplate.getForObject(
-                "/audit-events?actor={actor}", AuditEventResponse[].class, "user:42"
-        );
+        var results = restTemplate.getForObject("/audit-events?actor={actor}", AuditEventResponse[].class, "user:42");
 
-        assertThat(results).hasSize(2)
-                .allSatisfy(e -> assertThat(e.actor()).isEqualTo("user:42"));
+        assertThat(results).hasSize(2).allSatisfy(e -> assertThat(e.actor()).isEqualTo("user:42"));
     }
 
     @Test
@@ -170,12 +154,10 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:2", "resource.deleted", "project:1", "success");
         createEvent("user:3", "resource.updated", "project:99", "success");
 
-        var results = restTemplate.getForObject(
-                "/audit-events?resource={resource}", AuditEventResponse[].class, "project:1"
-        );
+        var results =
+                restTemplate.getForObject("/audit-events?resource={resource}", AuditEventResponse[].class, "project:1");
 
-        assertThat(results).hasSize(2)
-                .allSatisfy(e -> assertThat(e.resource()).isEqualTo("project:1"));
+        assertThat(results).hasSize(2).allSatisfy(e -> assertThat(e.resource()).isEqualTo("project:1"));
     }
 
     @Test
@@ -185,17 +167,14 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         var to = Instant.now().plusSeconds(2);
 
         var inRange = restTemplate.getForObject(
-                "/audit-events?from={from}&to={to}",
-                AuditEventResponse[].class, from.toString(), to.toString()
-        );
+                "/audit-events?from={from}&to={to}", AuditEventResponse[].class, from.toString(), to.toString());
         assertThat(inRange).hasSize(1);
 
         var outOfRange = restTemplate.getForObject(
                 "/audit-events?from={from}&to={to}",
                 AuditEventResponse[].class,
                 Instant.now().plusSeconds(100).toString(),
-                Instant.now().plusSeconds(200).toString()
-        );
+                Instant.now().plusSeconds(200).toString());
         assertThat(outOfRange).isEmpty();
     }
 
@@ -206,9 +185,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:2", "login", "project:1", "success");
 
         var results = restTemplate.getForObject(
-                "/audit-events?actor={actor}&resource={resource}",
-                AuditEventResponse[].class, "user:1", "project:1"
-        );
+                "/audit-events?actor={actor}&resource={resource}", AuditEventResponse[].class, "user:1", "project:1");
 
         assertThat(results).hasSize(1);
         assertThat(results[0].actor()).isEqualTo("user:1");
@@ -220,8 +197,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:1", "login", "session", "success");
 
         var results = restTemplate.getForObject(
-                "/audit-events?actor={actor}", AuditEventResponse[].class, "nonexistent:actor"
-        );
+                "/audit-events?actor={actor}", AuditEventResponse[].class, "nonexistent:actor");
 
         assertThat(results).isEmpty();
     }
@@ -251,9 +227,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
     void delete_auditEvent_returns404() {
         var created = createEvent("user:1", "login", "session", "success");
 
-        var response = restTemplate.exchange(
-                "/audit-events/{id}", HttpMethod.DELETE, null, Void.class, created.id()
-        );
+        var response = restTemplate.exchange("/audit-events/{id}", HttpMethod.DELETE, null, Void.class, created.id());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -262,9 +236,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
     void put_auditEvent_returns404() {
         var created = createEvent("user:1", "login", "session", "success");
 
-        var response = restTemplate.exchange(
-                "/audit-events/{id}", HttpMethod.PUT, null, Void.class, created.id()
-        );
+        var response = restTemplate.exchange("/audit-events/{id}", HttpMethod.PUT, null, Void.class, created.id());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -275,7 +247,6 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         return restTemplate.postForObject(
                 "/audit-events",
                 new CreateAuditEventRequest(actor, action, resource, outcome, null),
-                AuditEventResponse.class
-        );
+                AuditEventResponse.class);
     }
 }

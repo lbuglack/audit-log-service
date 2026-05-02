@@ -11,5 +11,4 @@ public record AuditEventResponse(
         String action,
         String resource,
         String outcome,
-        Map<String, Object> context
-) {}
+        Map<String, Object> context) {}
