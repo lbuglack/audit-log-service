@@ -58,7 +58,8 @@ public class AuditEventQueryRepository {
                             criteriaBuilder.lessThan(idPath, cursorId))));
         }
 
-        criteriaQuery.select(root)
+        criteriaQuery
+                .select(root)
                 .where(predicates.toArray(Predicate[]::new))
                 .orderBy(criteriaBuilder.desc(timestampPath), criteriaBuilder.desc(idPath));
 

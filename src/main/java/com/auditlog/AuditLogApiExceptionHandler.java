@@ -12,7 +12,6 @@ public class AuditLogApiExceptionHandler {
     @ExceptionHandler(InvalidQueryException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiErrorResponse handleInvalidQuery(InvalidQueryException exception) {
-        return new ApiErrorResponse(
-                exception.getCode(), exception.getMessage(), HttpStatus.BAD_REQUEST.value());
+        return new ApiErrorResponse(exception.getCode(), exception.getMessage(), HttpStatus.BAD_REQUEST.value());
     }
 }

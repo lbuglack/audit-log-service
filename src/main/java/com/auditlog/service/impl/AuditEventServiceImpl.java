@@ -123,7 +123,8 @@ public class AuditEventServiceImpl implements AuditEventService {
     }
 
     private Instant parseFrom(String rawFrom) {
-        return parseTimestamp(rawFrom, true, "INVALID_FROM", "The from parameter must be a valid UTC timestamp or date.");
+        return parseTimestamp(
+                rawFrom, true, "INVALID_FROM", "The from parameter must be a valid UTC timestamp or date.");
     }
 
     private Instant parseTo(String rawTo) {
@@ -146,7 +147,10 @@ public class AuditEventServiceImpl implements AuditEventService {
                 if (startOfDay) {
                     return date.atStartOfDay(ZoneOffset.UTC).toInstant();
                 }
-                return date.plusDays(1).atStartOfDay(ZoneOffset.UTC).minusNanos(1_000).toInstant();
+                return date.plusDays(1)
+                        .atStartOfDay(ZoneOffset.UTC)
+                        .minusNanos(1_000)
+                        .toInstant();
             } catch (DateTimeParseException exception) {
                 throw new InvalidQueryException(code, message);
             }

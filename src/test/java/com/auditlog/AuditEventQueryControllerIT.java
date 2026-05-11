@@ -101,9 +101,12 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
 
     @Test
     void search_combinesActorAndResourceFiltersWithAnd() {
-        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
-        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:1", "login", "project:2", "success");
-        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T08:00:00Z"), "user:2", "login", "project:1", "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:1", "login", "project:2", "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T08:00:00Z"), "user:2", "login", "project:1", "success");
 
         var response = search("/audit-events?actor={actor}&resource={resource}", "USER:1", "PROJECT:1");
 
@@ -114,8 +117,10 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
 
     @Test
     void search_blankActorAndResourceFiltersAreIgnored() {
-        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
-        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "logout", "project:2", "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "logout", "project:2", "success");
 
         var response = search("/audit-events?actor={actor}&resource={resource}", "  ", " ");
 
@@ -129,10 +134,7 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T11:00:00Z"), "user:3", "login", "session", "success");
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T12:00:00Z"), "user:4", "login", "session", "success");
 
-        var response = search(
-                "/audit-events?from={from}&to={to}",
-                "2026-05-01T10:00:00Z",
-                "2026-05-01T11:00:00Z");
+        var response = search("/audit-events?from={from}&to={to}", "2026-05-01T10:00:00Z", "2026-05-01T11:00:00Z");
 
         assertThat(response.items()).hasSize(2);
         assertThat(response.items()).extracting(item -> item.actor()).containsExactly("user:3", "user:2");
@@ -155,7 +157,13 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     void search_dateOnlyBoundsAreNormalizedInUtc() {
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-09T23:59:59Z"), "user:1", "login", "session", "success");
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-10T00:00:00Z"), "user:2", "login", "session", "success");
-        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-10T23:59:59.999999Z"), "user:3", "login", "session", "success");
+        insertEvent(
+                UUID.randomUUID(),
+                Instant.parse("2026-05-10T23:59:59.999999Z"),
+                "user:3",
+                "login",
+                "session",
+                "success");
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-11T00:00:00Z"), "user:4", "login", "session", "success");
 
         var response = search("/audit-events?from={from}&to={to}", "2026-05-10", "2026-05-10");
@@ -287,7 +295,8 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
                 "different-user",
                 validFirstPage.nextCursor());
         assertInvalidQuery("/audit-events?limit=2&cursor={cursor}", "INVALID_CURSOR", validFirstPage.nextCursor());
-        assertInvalidQuery("/audit-events?cursor={cursor}", "INVALID_CURSOR", expireCursor(validFirstPage.nextCursor()));
+        assertInvalidQuery(
+                "/audit-events?cursor={cursor}", "INVALID_CURSOR", expireCursor(validFirstPage.nextCursor()));
     }
 
     private SearchAuditEventsResponse search(String path, Object... uriVariables) {
@@ -308,9 +317,7 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         String json = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
         ObjectNode payload = (ObjectNode) objectMapper.readTree(json);
         payload.put("issuedAt", Instant.now().minus(Duration.ofHours(2)).toString());
-        return Base64.getUrlEncoder()
-                .withoutPadding()
-                .encodeToString(objectMapper.writeValueAsBytes(payload));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(objectMapper.writeValueAsBytes(payload));
     }
 
     private long countEvents() {
