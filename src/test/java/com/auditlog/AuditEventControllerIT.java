@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.auditlog.dto.request.CreateAuditEventRequest;
 import com.auditlog.dto.response.AuditEventResponse;
+import com.auditlog.dto.response.SearchAuditEventsResponse;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,8 +29,6 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         jdbcTemplate.execute("TRUNCATE audit_events");
         jdbcTemplate.execute("ALTER TABLE audit_events ENABLE TRIGGER ALL");
     }
-
-    // --- POST /audit-events ---
 
     @Test
     void create_allFields_returns201WithPersistedEvent() {
@@ -56,6 +55,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         var response = restTemplate.postForEntity("/audit-events", request, AuditEventResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().context()).isNull();
     }
 
@@ -66,6 +66,7 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
 
         var body = restTemplate.postForObject("/audit-events", request, AuditEventResponse.class);
 
+        assertThat(body).isNotNull();
         assertThat(body.timestamp()).isBetween(before, Instant.now().plusSeconds(1));
     }
 
@@ -79,8 +80,6 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
                     .isEqualTo(HttpStatus.CREATED);
         }
     }
-
-    // --- Validation ---
 
     @Test
     void create_missingActor_returns400() {
@@ -124,17 +123,17 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
-    // --- GET /audit-events ---
-
     @Test
     void search_noFilters_returnsAllEvents() {
         createEvent("user:1", "login", "session", "success");
         createEvent("user:2", "logout", "session", "success");
         createEvent("svc:batch", "data.export", "report:5", "error");
 
-        var results = restTemplate.getForObject("/audit-events", AuditEventResponse[].class);
+        var response = restTemplate.getForObject("/audit-events", SearchAuditEventsResponse.class);
 
-        assertThat(results).hasSize(3);
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(3);
+        assertThat(response.nextCursor()).isNull();
     }
 
     @Test
@@ -143,9 +142,10 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:42", "resource.updated", "project:1", "success");
         createEvent("user:99", "login", "session", "denied");
 
-        var results = restTemplate.getForObject("/audit-events?actor={actor}", AuditEventResponse[].class, "user:42");
+        var response = restTemplate.getForObject("/audit-events?actor={actor}", SearchAuditEventsResponse.class, "user:42");
 
-        assertThat(results).hasSize(2).allSatisfy(e -> assertThat(e.actor()).isEqualTo("user:42"));
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(2).allSatisfy(event -> assertThat(event.actor()).isEqualTo("user:42"));
     }
 
     @Test
@@ -154,10 +154,11 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:2", "resource.deleted", "project:1", "success");
         createEvent("user:3", "resource.updated", "project:99", "success");
 
-        var results =
-                restTemplate.getForObject("/audit-events?resource={resource}", AuditEventResponse[].class, "project:1");
+        var response =
+                restTemplate.getForObject("/audit-events?resource={resource}", SearchAuditEventsResponse.class, "project:1");
 
-        assertThat(results).hasSize(2).allSatisfy(e -> assertThat(e.resource()).isEqualTo("project:1"));
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(2).allSatisfy(event -> assertThat(event.resource()).isEqualTo("project:1"));
     }
 
     @Test
@@ -167,15 +168,17 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         var to = Instant.now().plusSeconds(2);
 
         var inRange = restTemplate.getForObject(
-                "/audit-events?from={from}&to={to}", AuditEventResponse[].class, from.toString(), to.toString());
-        assertThat(inRange).hasSize(1);
+                "/audit-events?from={from}&to={to}", SearchAuditEventsResponse.class, from.toString(), to.toString());
+        assertThat(inRange).isNotNull();
+        assertThat(inRange.items()).hasSize(1);
 
         var outOfRange = restTemplate.getForObject(
                 "/audit-events?from={from}&to={to}",
-                AuditEventResponse[].class,
+                SearchAuditEventsResponse.class,
                 Instant.now().plusSeconds(100).toString(),
                 Instant.now().plusSeconds(200).toString());
-        assertThat(outOfRange).isEmpty();
+        assertThat(outOfRange).isNotNull();
+        assertThat(outOfRange.items()).isEmpty();
     }
 
     @Test
@@ -184,28 +187,34 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:1", "login", "project:2", "success");
         createEvent("user:2", "login", "project:1", "success");
 
-        var results = restTemplate.getForObject(
-                "/audit-events?actor={actor}&resource={resource}", AuditEventResponse[].class, "user:1", "project:1");
+        var response = restTemplate.getForObject(
+                "/audit-events?actor={actor}&resource={resource}",
+                SearchAuditEventsResponse.class,
+                "user:1",
+                "project:1");
 
-        assertThat(results).hasSize(1);
-        assertThat(results[0].actor()).isEqualTo("user:1");
-        assertThat(results[0].resource()).isEqualTo("project:1");
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().get(0).actor()).isEqualTo("user:1");
+        assertThat(response.items().get(0).resource()).isEqualTo("project:1");
     }
 
     @Test
     void search_noMatch_returnsEmptyList() {
         createEvent("user:1", "login", "session", "success");
 
-        var results = restTemplate.getForObject(
-                "/audit-events?actor={actor}", AuditEventResponse[].class, "nonexistent:actor");
+        var response =
+                restTemplate.getForObject("/audit-events?actor={actor}", SearchAuditEventsResponse.class, "nonexistent:actor");
 
-        assertThat(results).isEmpty();
+        assertThat(response).isNotNull();
+        assertThat(response.items()).isEmpty();
     }
 
     @Test
     void search_emptyDatabase_returnsEmptyList() {
-        var results = restTemplate.getForObject("/audit-events", AuditEventResponse[].class);
-        assertThat(results).isEmpty();
+        var response = restTemplate.getForObject("/audit-events", SearchAuditEventsResponse.class);
+        assertThat(response).isNotNull();
+        assertThat(response.items()).isEmpty();
     }
 
     @Test
@@ -214,14 +223,13 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
         createEvent("user:1", "action.second", "resource", "success");
         createEvent("user:1", "action.third", "resource", "success");
 
-        var results = restTemplate.getForObject("/audit-events", AuditEventResponse[].class);
+        var response = restTemplate.getForObject("/audit-events", SearchAuditEventsResponse.class);
 
-        assertThat(results).hasSize(3);
-        assertThat(results[0].timestamp()).isAfterOrEqualTo(results[1].timestamp());
-        assertThat(results[1].timestamp()).isAfterOrEqualTo(results[2].timestamp());
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(3);
+        assertThat(response.items().get(0).timestamp()).isAfterOrEqualTo(response.items().get(1).timestamp());
+        assertThat(response.items().get(1).timestamp()).isAfterOrEqualTo(response.items().get(2).timestamp());
     }
-
-    // --- Append-only enforcement ---
 
     @Test
     void delete_auditEvent_returns404() {
@@ -240,8 +248,6 @@ class AuditEventControllerIT extends AbstractIntegrationTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
-
-    // --- Helper ---
 
     private AuditEventResponse createEvent(String actor, String action, String resource, String outcome) {
         return restTemplate.postForObject(

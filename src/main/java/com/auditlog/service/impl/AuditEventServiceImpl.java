@@ -3,7 +3,10 @@ package com.auditlog.service.impl;
 import com.auditlog.dao.entity.AuditEventEntity;
 import com.auditlog.dao.repository.AuditEventRepository;
 import com.auditlog.dto.request.CreateAuditEventRequest;
+import com.auditlog.dto.request.SearchAuditEventsRequest;
 import com.auditlog.dto.response.AuditEventResponse;
+import com.auditlog.dto.response.AuditEventSearchItemResponse;
+import com.auditlog.dto.response.SearchAuditEventsResponse;
 import com.auditlog.service.AuditEventService;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Instant;
@@ -36,22 +39,46 @@ public class AuditEventServiceImpl implements AuditEventService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<AuditEventResponse> search(String actor, String resource, Instant from, Instant to) {
-        Specification<AuditEventEntity> spec = (root, query, cb) -> {
-            query.orderBy(cb.desc(root.get("timestamp")));
+    public SearchAuditEventsResponse search(SearchAuditEventsRequest request) {
+        Instant from = request.from() == null ? null : Instant.parse(request.from());
+        Instant to = request.to() == null ? null : Instant.parse(request.to());
+
+        Specification<AuditEventEntity> specification = (root, query, criteriaBuilder) -> {
+            query.orderBy(criteriaBuilder.desc(root.get("timestamp")));
             List<Predicate> predicates = new ArrayList<>();
-            if (actor != null) predicates.add(cb.equal(root.get("actor"), actor));
-            if (resource != null) predicates.add(cb.equal(root.get("resource"), resource));
-            if (from != null) predicates.add(cb.greaterThanOrEqualTo(root.get("timestamp"), from));
-            if (to != null) predicates.add(cb.lessThanOrEqualTo(root.get("timestamp"), to));
-            return cb.and(predicates.toArray(new Predicate[0]));
+            if (request.actor() != null) {
+                predicates.add(criteriaBuilder.equal(root.get("actor"), request.actor()));
+            }
+            if (request.resource() != null) {
+                predicates.add(criteriaBuilder.equal(root.get("resource"), request.resource()));
+            }
+            if (from != null) {
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("timestamp"), from));
+            }
+            if (to != null) {
+                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("timestamp"), to));
+            }
+            return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
         };
 
-        return auditEventRepository.findAll(spec).stream().map(this::toResponse).toList();
+        List<AuditEventSearchItemResponse> items =
+                auditEventRepository.findAll(specification).stream().map(this::toSearchResponse).toList();
+        return new SearchAuditEventsResponse(items, null);
     }
 
     private AuditEventResponse toResponse(AuditEventEntity entity) {
         return new AuditEventResponse(
+                entity.getId(),
+                entity.getTimestamp(),
+                entity.getActor(),
+                entity.getAction(),
+                entity.getResource(),
+                entity.getOutcome(),
+                entity.getContext());
+    }
+
+    private AuditEventSearchItemResponse toSearchResponse(AuditEventEntity entity) {
+        return new AuditEventSearchItemResponse(
                 entity.getId(),
                 entity.getTimestamp(),
                 entity.getActor(),
