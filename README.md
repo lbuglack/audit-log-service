@@ -82,22 +82,70 @@ curl -X POST http://localhost:8081/audit-events \
 ---
 
 ### GET /audit-events
-Search events. All parameters are optional and combinable. Results are ordered by `timestamp` descending.
+Search events. All parameters are optional and combinable. Results are ordered by `timestamp` descending with `id` as a deterministic tie-breaker.
 
 | Parameter | Type | Example |
 |---|---|---|
 | `actor` | string | `?actor=user:42` |
 | `resource` | string | `?resource=project:1` |
-| `from` | ISO 8601 | `?from=2026-04-01T00:00:00Z` |
-| `to` | ISO 8601 | `?to=2026-04-30T23:59:59Z` |
+| `from` | UTC ISO 8601 or date | `?from=2026-04-01T00:00:00Z` or `?from=2026-04-01` |
+| `to` | UTC ISO 8601 or date | `?to=2026-04-30T23:59:59Z` or `?to=2026-04-30` |
+| `limit` | integer | `?limit=25` |
+| `cursor` | opaque string | `?cursor=eyJ2ZXJzaW9uIjox...` |
 
 ```bash
 # by actor
 curl "http://localhost:8081/audit-events?actor=user:42"
 
 # by resource + time range
-curl "http://localhost:8081/audit-events?resource=project:1&from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z"
+curl "http://localhost:8081/audit-events?resource=project:1&from=2026-04-01&to=2026-04-30&limit=25"
+
+# next page
+curl "http://localhost:8081/audit-events?resource=project:1&from=2026-04-01&to=2026-04-30&limit=25&cursor=eyJ2ZXJzaW9uIjox..."
 ```
+
+**Query behavior**
+
+- `actor` and `resource` use exact case-insensitive matching.
+- Empty-string `actor` and `resource` values are ignored.
+- `from` and `to` are inclusive UTC bounds.
+- Date-only `from` values are normalized to the start of the UTC day.
+- Date-only `to` values are normalized to the inclusive end of the UTC day.
+- `limit` defaults to `50` and may not exceed `50`.
+- `nextCursor` is present only when more matching records remain.
+
+**Response — 200 OK**
+
+```json
+{
+  "items": [
+    {
+      "id": "af79ba8e-d767-420d-a2f3-55d1d7097eeb",
+      "timestamp": "2026-04-27T14:26:25.323249Z",
+      "actor": "user:42",
+      "action": "resource.updated",
+      "resource": "project:1",
+      "outcome": "success",
+      "context": null
+    }
+  ],
+  "nextCursor": "eyJ2ZXJzaW9uIjox..."
+}
+```
+
+The query response now uses an envelope with `items` and optional `nextCursor`, replacing the previous bare-array response shape.
+
+**Validation errors — 400 Bad Request**
+
+```json
+{
+  "code": "INVALID_CURSOR",
+  "message": "The cursor is invalid or has expired.",
+  "status": 400
+}
+```
+
+Invalid query input never returns partial results. Common `400` cases include malformed or non-UTC timestamps, `from > to`, invalid `limit`, and malformed or expired cursors.
 
 ## Architecture
 
@@ -115,7 +163,7 @@ controller  →  facade  →  service  →  dao
 | `facade` | Orchestration between controller and service |
 | `service` | Business logic, transactions, entity→DTO mapping |
 | `dao/entity` | JPA entities — all columns `updatable = false` |
-| `dao/repository` | Spring Data JPA + `JpaSpecificationExecutor` for dynamic search |
+| `dao/repository` | Spring Data JPA for writes plus a dedicated query repository for seek pagination |
 | `dto/request` | Incoming request records with Bean Validation |
 | `dto/response` | Outgoing response records |
 
@@ -127,15 +175,14 @@ controller  →  facade  →  service  →  dao
 
 ### Database indexes
 
-Five indexes cover the common query patterns:
+Four pagination-oriented indexes support the query API:
 
 | Index | Query pattern |
 |---|---|
-| `idx_audit_events_actor` | `?actor=` |
-| `idx_audit_events_resource` | `?resource=` |
-| `idx_audit_events_timestamp_desc` | `?from=&to=` and default sort |
-| `idx_audit_events_actor_timestamp` | `?actor=` + time range |
-| `idx_audit_events_resource_timestamp` | `?resource=` + time range |
+| `idx_audit_events_timestamp_id_desc` | default reverse-chronological scans and cursor pagination |
+| `idx_audit_events_lower_actor_timestamp_id_desc` | case-insensitive `actor` filtering with ordered pagination |
+| `idx_audit_events_lower_resource_timestamp_id_desc` | case-insensitive `resource` filtering with ordered pagination |
+| `idx_audit_events_lower_actor_lower_resource_timestamp_id_desc` | combined case-insensitive `actor` + `resource` filtering with ordered pagination |
 
 ## Database connection (local)
 
