@@ -1,5 +1,6 @@
 package com.auditlog.service.impl;
 
+import com.auditlog.AuditEventQueryCursor;
 import com.auditlog.InvalidQueryException;
 import com.auditlog.dao.entity.AuditEventEntity;
 import com.auditlog.dao.repository.AuditEventRepository;
@@ -9,7 +10,7 @@ import com.auditlog.dto.response.AuditEventResponse;
 import com.auditlog.dto.response.AuditEventSearchItemResponse;
 import com.auditlog.dto.response.SearchAuditEventsResponse;
 import com.auditlog.service.AuditEventService;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import java.nio.charset.StandardCharsets;
@@ -22,9 +23,11 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AuditEventServiceImpl implements AuditEventService {
 
+    private static final int CURSOR_VERSION = 1;
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 50;
     private static final Duration CURSOR_TTL = Duration.ofHours(1);
@@ -63,11 +67,12 @@ public class AuditEventServiceImpl implements AuditEventService {
         Instant from = parseFrom(request.from());
         Instant to = parseTo(request.to());
         validateTimeRange(from, to);
+
         int limit = parseLimit(request.limit());
-        validateCursor(request.cursor());
+        String filterFingerprint = buildFilterFingerprint(actor, resource, from, to);
+        AuditEventQueryCursor cursor = decodeCursor(request.cursor(), filterFingerprint, limit);
 
         Specification<AuditEventEntity> specification = (root, query, criteriaBuilder) -> {
-            query.orderBy(criteriaBuilder.desc(root.get("timestamp")));
             List<Predicate> predicates = new ArrayList<>();
             if (actor != null) {
                 predicates.add(criteriaBuilder.equal(criteriaBuilder.lower(root.get("actor")), actor));
@@ -81,16 +86,30 @@ public class AuditEventServiceImpl implements AuditEventService {
             if (to != null) {
                 predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("timestamp"), to));
             }
+            if (cursor != null) {
+                predicates.add(criteriaBuilder.or(
+                        criteriaBuilder.lessThan(root.get("timestamp"), cursor.lastTimestamp()),
+                        criteriaBuilder.and(
+                                criteriaBuilder.equal(root.get("timestamp"), cursor.lastTimestamp()),
+                                criteriaBuilder.lessThan(root.get("id"), cursor.lastId()))));
+            }
             return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
         };
 
-        List<AuditEventSearchItemResponse> items = auditEventRepository
-                .findAll(specification, PageRequest.of(0, limit))
-                .stream()
-                .map(this::toSearchResponse)
-                .toList();
+        List<AuditEventEntity> entities = auditEventRepository
+                .findAll(
+                        specification,
+                        PageRequest.of(0, limit + 1, Sort.by(Sort.Order.desc("timestamp"), Sort.Order.desc("id"))))
+                .getContent();
 
-        return new SearchAuditEventsResponse(items, null);
+        boolean hasMore = entities.size() > limit;
+        List<AuditEventEntity> pageEntities = hasMore ? entities.subList(0, limit) : entities;
+        List<AuditEventSearchItemResponse> items =
+                pageEntities.stream().map(this::toSearchResponse).toList();
+
+        String nextCursor =
+                hasMore ? encodeCursor(pageEntities.get(pageEntities.size() - 1), filterFingerprint, limit) : null;
+        return new SearchAuditEventsResponse(items, nextCursor);
     }
 
     private AuditEventResponse toResponse(AuditEventEntity entity) {
@@ -197,9 +216,9 @@ public class AuditEventServiceImpl implements AuditEventService {
         }
     }
 
-    private void validateCursor(String rawCursor) {
+    private AuditEventQueryCursor decodeCursor(String rawCursor, String expectedFingerprint, int expectedLimit) {
         if (rawCursor == null) {
-            return;
+            return null;
         }
 
         String cursor = rawCursor.trim();
@@ -207,23 +226,56 @@ public class AuditEventServiceImpl implements AuditEventService {
             throw invalidCursor();
         }
 
+        AuditEventQueryCursor payload;
         try {
             String json = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
-            JsonNode payload = objectMapper.readTree(json);
-            JsonNode issuedAtNode = payload.get("issuedAt");
-            if (issuedAtNode == null || !issuedAtNode.isTextual()) {
-                throw invalidCursor();
-            }
-
-            Instant issuedAt = Instant.parse(issuedAtNode.asText());
-            if (issuedAt.isBefore(Instant.now().minus(CURSOR_TTL))) {
-                throw invalidCursor();
-            }
-        } catch (InvalidQueryException exception) {
-            throw exception;
-        } catch (Exception exception) {
+            payload = objectMapper.readValue(json, AuditEventQueryCursor.class);
+        } catch (IllegalArgumentException | JsonProcessingException exception) {
             throw invalidCursor();
         }
+
+        if (payload == null
+                || payload.version() != CURSOR_VERSION
+                || payload.issuedAt() == null
+                || payload.lastTimestamp() == null
+                || payload.lastId() == null
+                || payload.filterFingerprint() == null
+                || payload.limit() == null) {
+            throw invalidCursor();
+        }
+
+        if (payload.issuedAt().isBefore(Instant.now().minus(CURSOR_TTL))) {
+            throw invalidCursor();
+        }
+
+        if (!expectedFingerprint.equals(payload.filterFingerprint()) || payload.limit() != expectedLimit) {
+            throw invalidCursor();
+        }
+
+        return payload;
+    }
+
+    private String encodeCursor(AuditEventEntity lastEntity, String filterFingerprint, int limit) {
+        AuditEventQueryCursor payload = new AuditEventQueryCursor(
+                CURSOR_VERSION, Instant.now(), lastEntity.getTimestamp(), lastEntity.getId(), filterFingerprint, limit);
+
+        try {
+            String json = objectMapper.writeValueAsString(payload);
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Failed to encode pagination cursor.", exception);
+        }
+    }
+
+    private String buildFilterFingerprint(String actor, String resource, Instant from, Instant to) {
+        return "actor=" + nullToken(actor)
+                + "|resource=" + nullToken(resource)
+                + "|from=" + nullToken(from)
+                + "|to=" + nullToken(to);
+    }
+
+    private String nullToken(Object value) {
+        return value == null ? "<null>" : value.toString();
     }
 
     private InvalidQueryException invalidLimit() {

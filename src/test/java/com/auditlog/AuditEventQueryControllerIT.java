@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.auditlog.dto.response.ApiErrorResponse;
 import com.auditlog.dto.response.SearchAuditEventsResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +27,9 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanup() {
@@ -113,11 +119,64 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         var response = search("/audit-events");
 
         assertThat(response.items()).hasSize(50);
-        assertThat(response.nextCursor()).isNull();
+        assertThat(response.nextCursor()).isNotBlank();
     }
 
     @Test
-    void search_invalidInputReturnsStructured400Responses() {
+    void search_limitSupportsSmallerPagesAndStableCursorTraversal() {
+        UUID firstId = UUID.fromString("00000000-0000-0000-0000-000000000011");
+        UUID secondId = UUID.fromString("00000000-0000-0000-0000-000000000012");
+        UUID thirdId = UUID.fromString("00000000-0000-0000-0000-000000000013");
+        insertEvent(firstId, Instant.parse("2026-05-01T08:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(secondId, Instant.parse("2026-05-01T09:00:00Z"), "user:2", "login", "session", "success");
+        insertEvent(thirdId, Instant.parse("2026-05-01T10:00:00Z"), "user:3", "login", "session", "success");
+
+        var firstPage = search("/audit-events?limit=2");
+        var secondPage = search("/audit-events?limit=2&cursor={cursor}", firstPage.nextCursor());
+
+        assertThat(firstPage.items()).extracting(item -> item.id()).containsExactly(thirdId, secondId);
+        assertThat(firstPage.nextCursor()).isNotBlank();
+        assertThat(secondPage.items()).extracting(item -> item.id()).containsExactly(firstId);
+        assertThat(secondPage.nextCursor()).isNull();
+        assertThat(List.of(
+                        firstPage.items().get(0).id(),
+                        firstPage.items().get(1).id(),
+                        secondPage.items().get(0).id()))
+                .containsExactly(thirdId, secondId, firstId);
+    }
+
+    @Test
+    void search_sameTimestampUsesIdDescTieBreak() {
+        UUID lowerId = UUID.fromString("00000000-0000-0000-0000-0000000000aa");
+        UUID higherId = UUID.fromString("00000000-0000-0000-0000-0000000000bb");
+        Instant timestamp = Instant.parse("2026-05-01T10:00:00Z");
+        insertEvent(lowerId, timestamp, "user:1", "login", "session", "success");
+        insertEvent(higherId, timestamp, "user:2", "login", "session", "success");
+
+        var response = search("/audit-events");
+
+        assertThat(response.items()).extracting(item -> item.id()).containsExactly(higherId, lowerId);
+    }
+
+    @Test
+    void search_freshFirstPageCanSeeNewlyInsertedRows() {
+        UUID originalId = UUID.fromString("00000000-0000-0000-0000-000000000021");
+        UUID newerId = UUID.fromString("00000000-0000-0000-0000-000000000022");
+        insertEvent(originalId, Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+
+        var firstPage = search("/audit-events?limit=1");
+        insertEvent(newerId, Instant.parse("2026-05-01T11:00:00Z"), "user:2", "login", "session", "success");
+        var freshFirstPage = search("/audit-events?limit=1");
+
+        assertThat(firstPage.items()).extracting(item -> item.id()).containsExactly(originalId);
+        assertThat(freshFirstPage.items()).extracting(item -> item.id()).containsExactly(newerId);
+    }
+
+    @Test
+    void search_invalidInputReturnsStructured400Responses() throws Exception {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "login", "session", "success");
+
         assertInvalidQuery("/audit-events?from={from}", "INVALID_FROM", "not-a-timestamp");
         assertInvalidQuery("/audit-events?from={from}", "INVALID_FROM", "2026-05-01T10:00:00+02:00");
         assertInvalidQuery("/audit-events?to={to}", "INVALID_TO", "bad-to");
@@ -129,7 +188,15 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         assertInvalidQuery("/audit-events?limit=0", "INVALID_LIMIT");
         assertInvalidQuery("/audit-events?limit=51", "INVALID_LIMIT");
         assertInvalidQuery("/audit-events?cursor={cursor}", "INVALID_CURSOR", "not-a-cursor");
-        assertInvalidQuery("/audit-events?cursor={cursor}", "INVALID_CURSOR", expiredCursor());
+
+        var validFirstPage = search("/audit-events?limit=1");
+        assertInvalidQuery(
+                "/audit-events?actor={actor}&limit=1&cursor={cursor}",
+                "INVALID_CURSOR",
+                "different-user",
+                validFirstPage.nextCursor());
+        assertInvalidQuery("/audit-events?limit=2&cursor={cursor}", "INVALID_CURSOR", validFirstPage.nextCursor());
+        assertInvalidQuery("/audit-events?cursor={cursor}", "INVALID_CURSOR", expireCursor(validFirstPage.nextCursor()));
     }
 
     private SearchAuditEventsResponse search(String path, Object... uriVariables) {
@@ -146,9 +213,13 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         assertThat(response.getBody().message()).isNotBlank();
     }
 
-    private String expiredCursor() {
-        String json = "{\"issuedAt\":\"" + Instant.now().minus(Duration.ofHours(2)) + "\"}";
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    private String expireCursor(String cursor) throws Exception {
+        String json = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+        ObjectNode payload = (ObjectNode) objectMapper.readTree(json);
+        payload.put("issuedAt", Instant.now().minus(Duration.ofHours(2)).toString());
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(objectMapper.writeValueAsBytes(payload));
     }
 
     private void insertEvent(UUID id, Instant timestamp, String actor, String action, String resource, String outcome) {
