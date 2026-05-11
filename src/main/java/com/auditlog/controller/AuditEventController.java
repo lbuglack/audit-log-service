@@ -1,13 +1,12 @@
 package com.auditlog.controller;
 
 import com.auditlog.dto.request.CreateAuditEventRequest;
+import com.auditlog.dto.request.SearchAuditEventsRequest;
 import com.auditlog.dto.response.AuditEventResponse;
+import com.auditlog.dto.response.SearchAuditEventsResponse;
 import com.auditlog.facade.AuditEventFacade;
 import jakarta.validation.Valid;
-import java.time.Instant;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,11 +24,13 @@ public class AuditEventController {
     }
 
     @GetMapping
-    public List<AuditEventResponse> search(
+    public SearchAuditEventsResponse search(
             @RequestParam(required = false) String actor,
             @RequestParam(required = false) String resource,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
-        return auditEventFacade.search(actor, resource, from, to);
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) String limit) {
+        return auditEventFacade.search(new SearchAuditEventsRequest(actor, resource, from, to, cursor, limit));
     }
 }
