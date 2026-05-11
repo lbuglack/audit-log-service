@@ -3,6 +3,7 @@ package com.auditlog.service.impl;
 import com.auditlog.AuditEventQueryCursor;
 import com.auditlog.InvalidQueryException;
 import com.auditlog.dao.entity.AuditEventEntity;
+import com.auditlog.dao.repository.AuditEventQueryRepository;
 import com.auditlog.dao.repository.AuditEventRepository;
 import com.auditlog.dto.request.CreateAuditEventRequest;
 import com.auditlog.dto.request.SearchAuditEventsRequest;
@@ -12,7 +13,6 @@ import com.auditlog.dto.response.SearchAuditEventsResponse;
 import com.auditlog.service.AuditEventService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.persistence.criteria.Predicate;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -20,15 +20,10 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +38,7 @@ public class AuditEventServiceImpl implements AuditEventService {
     private static final Pattern DATE_ONLY_PATTERN = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
     private final AuditEventRepository auditEventRepository;
+    private final AuditEventQueryRepository auditEventQueryRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -72,35 +68,14 @@ public class AuditEventServiceImpl implements AuditEventService {
         String filterFingerprint = buildFilterFingerprint(actor, resource, from, to);
         AuditEventQueryCursor cursor = decodeCursor(request.cursor(), filterFingerprint, limit);
 
-        Specification<AuditEventEntity> specification = (root, query, criteriaBuilder) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            if (actor != null) {
-                predicates.add(criteriaBuilder.equal(criteriaBuilder.lower(root.get("actor")), actor));
-            }
-            if (resource != null) {
-                predicates.add(criteriaBuilder.equal(criteriaBuilder.lower(root.get("resource")), resource));
-            }
-            if (from != null) {
-                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("timestamp"), from));
-            }
-            if (to != null) {
-                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("timestamp"), to));
-            }
-            if (cursor != null) {
-                predicates.add(criteriaBuilder.or(
-                        criteriaBuilder.lessThan(root.get("timestamp"), cursor.lastTimestamp()),
-                        criteriaBuilder.and(
-                                criteriaBuilder.equal(root.get("timestamp"), cursor.lastTimestamp()),
-                                criteriaBuilder.lessThan(root.get("id"), cursor.lastId()))));
-            }
-            return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
-        };
-
-        List<AuditEventEntity> entities = auditEventRepository
-                .findAll(
-                        specification,
-                        PageRequest.of(0, limit + 1, Sort.by(Sort.Order.desc("timestamp"), Sort.Order.desc("id"))))
-                .getContent();
+        List<AuditEventEntity> entities = auditEventQueryRepository.search(
+                actor,
+                resource,
+                from,
+                to,
+                cursor == null ? null : cursor.lastTimestamp(),
+                cursor == null ? null : cursor.lastId(),
+                limit + 1);
 
         boolean hasMore = entities.size() > limit;
         List<AuditEventEntity> pageEntities = hasMore ? entities.subList(0, limit) : entities;
