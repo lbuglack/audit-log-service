@@ -39,6 +39,24 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void search_noFilters_returnsEnvelopeSortedByTimestampDescThenIdDesc() {
+        UUID oldestId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID middleId = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        UUID newestId = UUID.fromString("00000000-0000-0000-0000-000000000003");
+        insertEvent(oldestId, Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(middleId, Instant.parse("2026-05-02T10:00:00Z"), "user:2", "logout", "session", "denied");
+        insertEvent(newestId, Instant.parse("2026-05-03T10:00:00Z"), "svc:batch", "export", "report:5", "error");
+
+        var response = search("/audit-events");
+
+        assertThat(response).isNotNull();
+        assertThat(response.nextCursor()).isNull();
+        assertThat(response.items()).extracting(item -> item.id()).containsExactly(newestId, middleId, oldestId);
+        assertThat(response.items().get(0).actor()).isEqualTo("svc:batch");
+        assertThat(response.items().get(0).context()).isNull();
+    }
+
+    @Test
     void search_byActor_isExactAndCaseInsensitive() {
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "User:42", "login", "session", "success");
         insertEvent(
@@ -82,6 +100,19 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void search_combinesActorAndResourceFiltersWithAnd() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:1", "login", "project:2", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T08:00:00Z"), "user:2", "login", "project:1", "success");
+
+        var response = search("/audit-events?actor={actor}&resource={resource}", "USER:1", "PROJECT:1");
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().get(0).actor()).isEqualTo("user:1");
+        assertThat(response.items().get(0).resource()).isEqualTo("project:1");
+    }
+
+    @Test
     void search_blankActorAndResourceFiltersAreIgnored() {
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "logout", "project:2", "success");
@@ -89,6 +120,35 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         var response = search("/audit-events?actor={actor}&resource={resource}", "  ", " ");
 
         assertThat(response.items()).hasSize(2);
+    }
+
+    @Test
+    void search_inclusiveFromAndToBounds_returnOnlyMatchingEvents() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:59:59Z"), "user:1", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:2", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T11:00:00Z"), "user:3", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T12:00:00Z"), "user:4", "login", "session", "success");
+
+        var response = search(
+                "/audit-events?from={from}&to={to}",
+                "2026-05-01T10:00:00Z",
+                "2026-05-01T11:00:00Z");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items()).extracting(item -> item.actor()).containsExactly("user:3", "user:2");
+    }
+
+    @Test
+    void search_openEndedFromAndToAreSupported() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:2", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T11:00:00Z"), "user:3", "login", "session", "success");
+
+        var fromOnly = search("/audit-events?from={from}", "2026-05-01T10:00:00Z");
+        assertThat(fromOnly.items()).extracting(item -> item.actor()).containsExactly("user:3", "user:2");
+
+        var toOnly = search("/audit-events?to={to}", "2026-05-01T10:00:00Z");
+        assertThat(toOnly.items()).extracting(item -> item.actor()).containsExactly("user:2", "user:1");
     }
 
     @Test
@@ -102,6 +162,16 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
 
         assertThat(response.items()).hasSize(2);
         assertThat(response.items()).extracting(item -> item.actor()).containsExactly("user:3", "user:2");
+    }
+
+    @Test
+    void search_noMatches_returnsEmptyItemsAndNoNextCursor() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+
+        var response = search("/audit-events?actor={actor}", "missing:user");
+
+        assertThat(response.items()).isEmpty();
+        assertThat(response.nextCursor()).isNull();
     }
 
     @Test
@@ -146,6 +216,16 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void search_limit50IsAccepted() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "login", "session", "success");
+
+        var response = search("/audit-events?limit=50");
+
+        assertThat(response.items()).hasSize(2);
+    }
+
+    @Test
     void search_sameTimestampUsesIdDescTieBreak() {
         UUID lowerId = UUID.fromString("00000000-0000-0000-0000-0000000000aa");
         UUID higherId = UUID.fromString("00000000-0000-0000-0000-0000000000bb");
@@ -170,6 +250,17 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
 
         assertThat(firstPage.items()).extracting(item -> item.id()).containsExactly(originalId);
         assertThat(freshFirstPage.items()).extracting(item -> item.id()).containsExactly(newerId);
+    }
+
+    @Test
+    void search_isReadOnly() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+        long beforeCount = countEvents();
+
+        var response = search("/audit-events?actor={actor}", "user:1");
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(countEvents()).isEqualTo(beforeCount);
     }
 
     @Test
@@ -220,6 +311,10 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         return Base64.getUrlEncoder()
                 .withoutPadding()
                 .encodeToString(objectMapper.writeValueAsBytes(payload));
+    }
+
+    private long countEvents() {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_events", Long.class);
     }
 
     private void insertEvent(UUID id, Instant timestamp, String actor, String action, String resource, String outcome) {
