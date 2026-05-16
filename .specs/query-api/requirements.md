@@ -38,7 +38,7 @@ As an SRE, I want to reconstruct the timeline of actions on a resource during an
 
 Acceptance criteria:
 
-1. Given multiple matching events exist for the same resource, when the request is executed, then the events are returned sorted by `timestamp`.
+1. Given multiple matching events exist for the same resource, when the request is executed, then the events are returned sorted by `timestamp` descending, with `id` descending as the tie-breaker.
 2. Given a time-bounded incident investigation, when `resource`, `from`, and `to` are supplied, then the API returns only events for that resource in the inclusive time window.
 3. Given the endpoint is read-only, when an SRE queries audit data, then no audit records are created, updated, or deleted.
 4. Given an event is returned, when the SRE inspects the result, then the response reflects stored audit data and does not omit the actor, resource, action, or timestamp information needed for timeline reconstruction.
@@ -68,7 +68,7 @@ Acceptance criteria:
 4. Given `to` is provided as a date without a time, when the request is executed, then the API interprets it as the inclusive end of that day in UTC.
 5. Given `from` is later than `to`, when the request is executed, then the API returns `400 Bad Request`.
 6. Given the request contains invalid query parameters, when validation fails, then the API does not return partial results.
-7. Given the API returns `400 Bad Request`, when the client inspects the response, then the body contains machine-readable `code`, human-readable `message`, and numeric `status` fields.
+7. Given the API returns `400 Bad Request`, when the client inspects the response, then the body contains machine-readable `code`, a non-empty `message` string that identifies the invalid parameter or validation failure, and numeric `status` fields.
 
 # Out of scope
 

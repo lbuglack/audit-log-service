@@ -1,6 +1,6 @@
 ---
 name: spec-self-eval
-description: Validate `.specs/<feature>/requirements.md`, `design.md`, and `tasks.md` against the project checklist and emit a strict `PASS` / `WEAK` / `FAIL` report saved to `.specs/<feature>/eval-report-YYYY-MM-DD.md`. Use when the user asks to self-evaluate a spec, audit implementation readiness, review spec quality, or generate an eval report for the latest feature spec.
+description: Validate `.specs/<feature>/requirements.md`, `design.md`, and `tasks.md` against the project checklist and emit a strict `PASS` / `WEAK` / `FAIL` report saved to `.specs/<feature>/eval-report-YYYY-MM-DD-HH-mm.md`. Use when the user asks to self-evaluate a spec, audit implementation readiness, review spec quality, or generate an eval report for the latest feature spec.
 ---
 
 # Spec Self Eval
@@ -54,9 +54,9 @@ Use a strict overall verdict:
 
 ## Report Requirements
 
-Save the report to `.specs/<feature>/eval-report-YYYY-MM-DD.md`.
+Save the report to `.specs/<feature>/eval-report-YYYY-MM-DD-HH-mm.md`.
 
-Use the current date in `YYYY-MM-DD` format. If the same-day report already exists, overwrite it instead of creating duplicates.
+Use the current local date and time in `YYYY-MM-DD-HH-mm` format. If the same-minute report already exists, overwrite it instead of creating duplicates.
 
 For every checklist item:
 
