@@ -1,6 +1,6 @@
 ---
 name: spec-self-eval
-description: Validate `specs/<feature>/requirements.md`, `design.md`, and `tasks.md` against the project checklist and emit a strict `PASS` / `WEAK` / `FAIL` report saved to `specs/<feature>/eval-report-YYYY-MM-DD.md`. Use when the user asks to self-evaluate a spec, audit implementation readiness, review spec quality, or generate an eval report for the latest feature spec.
+description: Validate `.specs/<feature>/requirements.md`, `design.md`, and `tasks.md` against the project checklist and emit a strict `PASS` / `WEAK` / `FAIL` report saved to `.specs/<feature>/eval-report-YYYY-MM-DD.md`. Prefer `.specs/` and support legacy `specs/` layouts. Use when the user asks to self-evaluate a spec, audit implementation readiness, review spec quality, or generate an eval report for the latest feature spec.
 ---
 
 # Spec Self Eval
@@ -9,22 +9,28 @@ Use this skill to audit a feature spec bundle before implementation begins.
 
 ## Scope
 
+Select the spec root before reading anything else:
+
+1. If `.specs/` exists, use `.specs/`.
+2. Otherwise, if `specs/` exists, use `specs/`.
+3. If both exist, prefer `.specs/` unless the user names a different path.
+
 Review exactly these files inside one feature folder:
 
-- `specs/<feature>/requirements.md`
-- `specs/<feature>/design.md`
-- `specs/<feature>/tasks.md`
+- `<spec-root>/<feature>/requirements.md`
+- `<spec-root>/<feature>/design.md`
+- `<spec-root>/<feature>/tasks.md`
 
 If the user names a feature, use that folder.
 
-If the user does not name a feature, auto-detect the most recently edited `specs/<feature>/` folder. Determine recency from the newest modified time among `requirements.md`, `design.md`, and `tasks.md`. Ignore top-level checklist files and existing `eval-report-*.md` files.
+If the user does not name a feature, auto-detect the most recently edited `<spec-root>/<feature>/` folder. Determine recency from the newest modified time among `requirements.md`, `design.md`, and `tasks.md`. Ignore top-level checklist files, nested `plans/` folders, and existing `eval-report-*.md` files.
 
 ## Checklist Source
 
 Read the checklist from the first path that exists:
 
-1. `specs/_eval-checklist.md`
-2. `specs/_ eval-checklist.md`
+1. `<spec-root>/_eval-checklist.md`
+2. `<spec-root>/_ eval-checklist.md`
 3. `references/_eval-checklist.md`
 
 Treat each non-empty line as one required evaluation point.
@@ -55,7 +61,7 @@ Use a strict overall verdict:
 
 ## Report Requirements
 
-Save the report to `specs/<feature>/eval-report-YYYY-MM-DD.md`.
+Save the report to `<spec-root>/<feature>/eval-report-YYYY-MM-DD.md`.
 
 Use the current date in `YYYY-MM-DD` format. If the same-day report already exists, overwrite it instead of creating duplicates.
 
@@ -71,7 +77,7 @@ For every checklist item:
 ```md
 # Evaluation Report
 
-- Feature: `specs/<feature>/`
+- Feature: `<spec-root>/<feature>/`
 - Date: `YYYY-MM-DD`
 - Checklist source: `...`
 - Overall verdict: `PASS | WEAK | FAIL`
