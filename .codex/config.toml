@@ -1,0 +1,16 @@
+[features]
+codex_hooks = true
+
+[hooks]
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "python3 .codex/hooks/spec_self_eval_gate.py"
+statusMessage = "Snapshotting .specs state"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "python3 .codex/hooks/spec_self_eval_gate.py"
+statusMessage = "Running spec self-eval gate"
