@@ -1,13 +1,13 @@
 package com.auditlog.service;
 
 import com.auditlog.dto.request.CreateAuditEventRequest;
+import com.auditlog.dto.request.SearchAuditEventsRequest;
 import com.auditlog.dto.response.AuditEventResponse;
-import java.time.Instant;
-import java.util.List;
+import com.auditlog.dto.response.SearchAuditEventsResponse;
 
 public interface AuditEventService {
 
     AuditEventResponse create(CreateAuditEventRequest request);
 
-    List<AuditEventResponse> search(String actor, String resource, Instant from, Instant to);
+    SearchAuditEventsResponse search(SearchAuditEventsRequest request);
 }
