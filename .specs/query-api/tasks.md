@@ -76,3 +76,50 @@ DoD —
 - `./gradlew test` passes with the final implementation.
 
 Size — 1 safe commit / PR
+
+## T6. Extend query parsing, validation, and cursor semantics for multi-actor filters
+
+Refs — `requirements.md`: `Compliance officer`, `Security analyst`, `Validation and error handling`; `design.md`: `API contract`, `Validation rules`, `Pagination strategy`, `Integration with api / domain / infrastructure layers`
+
+Dependencies — `T1`, `T2`, `T3`
+
+DoD —
+- `actor` is accepted as a comma-separated query parameter and normalized by trimming whitespace around each supplied value.
+- Actor entries that become empty after trimming are ignored, and the actor filter is treated as not provided when no non-empty actor values remain.
+- Repeated supplied actor values still count toward the maximum of `10`, but duplicate normalized actor values are deduplicated before query execution.
+- Multi-actor filtering applies logical `OR` across the normalized actor set and logical `AND` with any supplied `resource`, `from`, and `to` filters.
+- Requests with more than `10` supplied actor values return the approved structured `422 Unprocessable Entity` response body, while malformed or expired cursors continue to return structured `400 Bad Request` responses.
+- Cursor handling binds each paginated traversal to the normalized filter set so later page requests with a mismatched actor set or other mismatched filters are rejected instead of silently continuing.
+
+Size — 1 safe commit / PR
+
+## T7. Extend repository and index support for multi-actor seek pagination
+
+Refs — `requirements.md`: `Compliance officer`, `Security analyst`, `Data access and indexing`; `design.md`: `Indexes`, `Sort & determinism`, `Pagination strategy`, `Validation rules`, `Integration with api / domain / infrastructure layers`
+
+Dependencies — `T4`, `T6`
+
+DoD —
+- Repository querying supports case-insensitive membership checks against the normalized actor set while preserving inclusive time bounds, open-ended time ranges, combined resource filtering, and the approved `timestamp DESC, id DESC` order.
+- Seek-pagination predicates remain explicit for multi-actor queries and continue to avoid loss or duplication when multiple matching rows share the same `timestamp`.
+- A Flyway migration adds or adjusts the actor-oriented composite index so case-insensitive multi-actor retrieval can use the approved sort order without requiring a full table scan.
+- Existing resource-only and combined actor/resource query behavior remains aligned with the repository layering and append-only constraints.
+- Testcontainers-backed integration coverage exercises multi-actor queries together with resource, time-range, and shared-timestamp pagination scenarios.
+
+Size — 1 safe commit / PR
+
+## T8. Backfill multi-actor regression coverage and consumer-facing contract updates
+
+Refs — `requirements.md`: `Compliance officer`, `Security analyst`, `Validation and error handling`; `design.md`: `API contract`, `Sort & determinism`, `Pagination strategy`, `Validation rules`, `AGENTS.md alignment`
+
+Dependencies — `T5`, `T6`, `T7`
+
+DoD —
+- Regression coverage includes multi-actor actor-only queries, multi-actor queries combined with resource and time bounds, trimming behavior, empty-after-trim actor entries being ignored, unordered actor semantics, and repeated supplied values counting toward the `10`-value maximum.
+- Regression coverage verifies deduplicated matching behavior, stable `timestamp DESC, id DESC` ordering, `nextCursor` progression across multi-actor result sets, and rejection of mismatched filter sets on cursor reuse.
+- Negative coverage verifies structured `422 Unprocessable Entity` responses for requests with more than `10` supplied actor values and structured `400 Bad Request` responses for malformed, expired, or filter-mismatched cursors without partial results.
+- `README.md` and any query examples are updated to document comma-separated actor filtering, unordered actor semantics, the `422` validation case, and the paginated `items` plus optional `nextCursor` response contract.
+- Consumer-facing rollout notes document the externally visible multi-actor query expansion and the new validation behavior.
+- `./gradlew test` passes with the multi-actor delta integrated.
+
+Size — 1 safe commit / PR
