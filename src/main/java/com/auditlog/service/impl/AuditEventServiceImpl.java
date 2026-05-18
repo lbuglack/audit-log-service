@@ -21,9 +21,13 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +38,7 @@ public class AuditEventServiceImpl implements AuditEventService {
     private static final int CURSOR_VERSION = 1;
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 50;
+    private static final int MAX_ACTOR_VALUES = 10;
     private static final Duration CURSOR_TTL = Duration.ofHours(1);
     private static final Pattern DATE_ONLY_PATTERN = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
@@ -58,18 +63,18 @@ public class AuditEventServiceImpl implements AuditEventService {
     @Override
     @Transactional(readOnly = true)
     public SearchAuditEventsResponse search(SearchAuditEventsRequest request) {
-        String actor = normalizeFilter(request.actor());
-        String resource = normalizeFilter(request.resource());
+        List<String> actors = parseActors(request.actor());
+        String resource = normalizeResource(request.resource());
         Instant from = parseFrom(request.from());
         Instant to = parseTo(request.to());
         validateTimeRange(from, to);
 
         int limit = parseLimit(request.limit());
-        String filterFingerprint = buildFilterFingerprint(actor, resource, from, to);
+        String filterFingerprint = buildFilterFingerprint(actors, resource, from, to);
         AuditEventQueryCursor cursor = decodeCursor(request.cursor(), filterFingerprint, limit);
 
         List<AuditEventEntity> entities = auditEventQueryRepository.search(
-                actor,
+                actors,
                 resource,
                 from,
                 to,
@@ -109,7 +114,29 @@ public class AuditEventServiceImpl implements AuditEventService {
                 entity.getContext());
     }
 
-    private String normalizeFilter(String value) {
+    private List<String> parseActors(String rawActor) {
+        if (rawActor == null) {
+            return null;
+        }
+
+        String[] suppliedValues = rawActor.split(",", -1);
+        if (suppliedValues.length > MAX_ACTOR_VALUES) {
+            throw tooManyActorValues();
+        }
+
+        Set<String> normalizedActors = new LinkedHashSet<>();
+        for (String suppliedValue : suppliedValues) {
+            String trimmed = suppliedValue.trim();
+            if (trimmed.isEmpty()) {
+                throw invalidActor();
+            }
+            normalizedActors.add(trimmed.toLowerCase());
+        }
+
+        return normalizedActors.stream().sorted().toList();
+    }
+
+    private String normalizeResource(String value) {
         if (value == null) {
             return null;
         }
@@ -246,11 +273,18 @@ public class AuditEventServiceImpl implements AuditEventService {
         }
     }
 
-    private String buildFilterFingerprint(String actor, String resource, Instant from, Instant to) {
-        return "actor=" + nullToken(actor)
+    private String buildFilterFingerprint(List<String> actors, String resource, Instant from, Instant to) {
+        return "actor=" + nullToken(joinActors(actors))
                 + "|resource=" + nullToken(resource)
                 + "|from=" + nullToken(from)
                 + "|to=" + nullToken(to);
+    }
+
+    private String joinActors(List<String> actors) {
+        if (actors == null) {
+            return null;
+        }
+        return actors.stream().collect(Collectors.joining(","));
     }
 
     private String nullToken(Object value) {
@@ -260,6 +294,17 @@ public class AuditEventServiceImpl implements AuditEventService {
     private InvalidQueryException invalidLimit() {
         return new InvalidQueryException(
                 "INVALID_LIMIT", "The limit parameter must be greater than 0 and less than or equal to 50.");
+    }
+
+    private InvalidQueryException invalidActor() {
+        return new InvalidQueryException("INVALID_ACTOR", "The actor parameter must not contain empty values.");
+    }
+
+    private InvalidQueryException tooManyActorValues() {
+        return new InvalidQueryException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "TOO_MANY_ACTOR_VALUES",
+                "The actor parameter accepts at most 10 values.");
     }
 
     private InvalidQueryException invalidCursor() {

@@ -22,7 +22,7 @@ public class AuditEventQueryRepository {
     private final EntityManager entityManager;
 
     public List<AuditEventEntity> search(
-            String actor,
+            List<String> actors,
             String resource,
             Instant from,
             Instant to,
@@ -38,8 +38,8 @@ public class AuditEventQueryRepository {
         Path<UUID> idPath = root.get("id");
 
         List<Predicate> predicates = new ArrayList<>();
-        if (actor != null) {
-            predicates.add(criteriaBuilder.equal(criteriaBuilder.lower(actorPath), actor));
+        if (actors != null && !actors.isEmpty()) {
+            predicates.add(criteriaBuilder.lower(actorPath).in(actors));
         }
         if (resource != null) {
             predicates.add(criteriaBuilder.equal(criteriaBuilder.lower(resourcePath), resource));
