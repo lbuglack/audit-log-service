@@ -37,9 +37,9 @@ Success response shape:
 ```
 
 - Returned events are stored audit records in descending timestamp order.
-- `actor` is an optional comma-separated query parameter that accepts up to 10 supplied values per request.
+- When provided, `actor` is an optional comma-separated query parameter that accepts from 1 to 10 supplied values per request before deduplication.
 - Leading and trailing whitespace around each supplied actor value is ignored before matching.
-- Actor values that become empty after trimming are ignored, and the actor filter is treated as not provided when no non-empty actor values remain.
+- Any supplied actor value that is empty after trimming must be rejected with `400 Bad Request`.
 - Repeated actor values still count toward the 10-value maximum, but duplicate normalized actor values are deduplicated before query execution.
 - Actor matching is case-insensitive exact-match against an unordered normalized actor set.
 - `context` may be `null`.
@@ -47,6 +47,7 @@ Success response shape:
 - The endpoint is read-only.
 - Invalid `from` returns `400 Bad Request`.
 - Invalid `to` returns `400 Bad Request`.
+- An empty supplied actor value returns `400 Bad Request`.
 - Invalid `cursor` returns `400 Bad Request`.
 - Invalid `limit` returns `400 Bad Request`.
 - More than 10 supplied actor values returns `422 Unprocessable Entity`.
@@ -94,7 +95,8 @@ Error response shape for invalid query input (`400` or `422`):
 - The cursor must encode the last returned sort position so the next page can continue after `timestamp DESC, id DESC`.
 - The cursor must carry enough information to enforce a one-hour validity window from the time it was issued.
 - The cursor must bind to the normalized filter set from the first page of the traversal.
-- The normalized filter set treats actor values as a deduplicated, case-normalized, unordered set after trimming and empty-value removal, and includes the normalized `resource`, `from`, and `to` filters.
+- The normalized filter set treats actor values as a deduplicated, case-normalized, unordered set after trimming and validation, and includes the normalized `resource`, `from`, and `to` filters.
+- Keyset pagination must preserve stability and seek correctness when `actor`, `resource`, `from`, and `to` are all supplied together.
 - If a later page request presents a cursor with a different normalized filter set than the one the cursor was issued for, the API must reject the request with `400 Bad Request`.
 - A cursor older than one hour must be rejected with `400 Bad Request`.
 - Offset pagination should not be used because it is more vulnerable to drift, duplication, and missing records when new events are appended during traversal.
@@ -121,8 +123,8 @@ Reasoning:
 
 - `actor` is parsed as a comma-separated list when provided.
 - Leading and trailing whitespace is trimmed from each supplied actor value before validation and matching.
-- Actor values that become empty after trimming are ignored.
-- The actor filter is treated as not provided when no non-empty actor values remain after trimming.
+- Any supplied actor value that becomes empty after trimming must be rejected with `400 Bad Request`.
+- When provided, `actor` must contain between 1 and 10 supplied comma-separated values before deduplication.
 - Repeated actor values count toward the maximum of 10 supplied actor values.
 - After validation, actor values are deduplicated, case-normalized, and treated as an unordered set for matching and cursor binding.
 - Each normalized actor value participates in case-insensitive exact-match filtering, and multiple actor values are combined with logical `OR`.
@@ -153,7 +155,7 @@ Reasoning:
   - Coordinates the query use case and keeps orchestration logic out of the controller.
   - Delegates to the service layer and maps the service result to the API response contract if needed.
 - `service`
-  - Owns query rules such as actor-list trimming, empty-value removal, max-count validation, deduplication, case-insensitive filtering, UTC date-bound normalization, default/max limit handling, cursor decoding, cursor expiry handling, normalized filter-set binding, deterministic ordering, and next-cursor generation.
+  - Owns query rules such as actor-list trimming, empty-value validation, supplied-value count validation, deduplication, case-insensitive filtering, UTC date-bound normalization, default/max limit handling, cursor decoding, cursor expiry handling, normalized filter-set binding, deterministic ordering, and next-cursor generation.
   - Executes the read-only transaction boundary.
 - `dao/repository`
   - Performs filtered and ordered reads from the append-only audit store.
