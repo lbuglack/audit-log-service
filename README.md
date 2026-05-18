@@ -86,7 +86,7 @@ Search events. All parameters are optional and combinable. Results are ordered b
 
 | Parameter | Type | Example |
 |---|---|---|
-| `actor` | string | `?actor=user:42` |
+| `actor` | comma-separated string | `?actor=user:42,svc:batch` |
 | `resource` | string | `?resource=project:1` |
 | `from` | UTC ISO 8601 or date | `?from=2026-04-01T00:00:00Z` or `?from=2026-04-01` |
 | `to` | UTC ISO 8601 or date | `?to=2026-04-30T23:59:59Z` or `?to=2026-04-30` |
@@ -94,25 +94,33 @@ Search events. All parameters are optional and combinable. Results are ordered b
 | `cursor` | opaque string | `?cursor=eyJ2ZXJzaW9uIjox...` |
 
 ```bash
-# by actor
+# by one actor
 curl "http://localhost:8081/audit-events?actor=user:42"
 
-# by resource + time range
-curl "http://localhost:8081/audit-events?resource=project:1&from=2026-04-01&to=2026-04-30&limit=25"
+# by multiple actors
+curl "http://localhost:8081/audit-events?actor=user:42,svc:batch,svc:payments"
+
+# mixed filter set with keyset pagination
+curl "http://localhost:8081/audit-events?actor=user:42,svc:batch&resource=project:1&from=2026-04-01&to=2026-04-30&limit=25"
 
 # next page
-curl "http://localhost:8081/audit-events?resource=project:1&from=2026-04-01&to=2026-04-30&limit=25&cursor=eyJ2ZXJzaW9uIjox..."
+curl "http://localhost:8081/audit-events?actor=svc:batch,user:42&resource=project:1&from=2026-04-01&to=2026-04-30&limit=25&cursor=eyJ2ZXJzaW9uIjox..."
 ```
 
 **Query behavior**
 
-- `actor` and `resource` use exact case-insensitive matching.
-- Empty-string `actor` and `resource` values are ignored.
+- `actor` accepts from `1` to `10` supplied comma-separated values when present.
+- `actor` values are trimmed, deduplicated after validation, and matched as an unordered case-insensitive exact-match set.
+- Empty supplied `actor` values, including values that become empty after trimming, return `400 Bad Request`.
+- `resource` uses exact case-insensitive matching.
+- Empty-string `resource` values are ignored.
 - `from` and `to` are inclusive UTC bounds.
 - Date-only `from` values are normalized to the start of the UTC day.
 - Date-only `to` values are normalized to the inclusive end of the UTC day.
 - `limit` defaults to `50` and may not exceed `50`.
+- Requests with `11` supplied actor values return `422 Unprocessable Entity`.
 - `nextCursor` is present only when more matching records remain.
+- `cursor` is bound to the normalized filter set and page size of the original traversal.
 
 **Response — 200 OK**
 
@@ -133,9 +141,9 @@ curl "http://localhost:8081/audit-events?resource=project:1&from=2026-04-01&to=2
 }
 ```
 
-The query response now uses an envelope with `items` and optional `nextCursor`, replacing the previous bare-array response shape.
+The query response now uses an envelope with `items` and optional `nextCursor`, replacing the previous bare-array response shape, and the query contract now supports multi-actor filtering through a comma-separated `actor` parameter.
 
-**Validation errors — 400 Bad Request**
+**Validation errors — 400 Bad Request / 422 Unprocessable Entity**
 
 ```json
 {
@@ -145,7 +153,7 @@ The query response now uses an envelope with `items` and optional `nextCursor`, 
 }
 ```
 
-Invalid query input never returns partial results. Common `400` cases include malformed or non-UTC timestamps, `from > to`, invalid `limit`, and malformed or expired cursors.
+Invalid query input never returns partial results. Common `400` cases include malformed or non-UTC timestamps, `from > to`, invalid `limit`, malformed or expired cursors, and empty supplied `actor` values. Requests with `11` supplied actor values return `422 Unprocessable Entity`.
 
 ## Architecture
 
@@ -171,7 +179,7 @@ controller  →  facade  →  service  →  dao
 
 - **Append-only** — no `UPDATE` or `DELETE` endpoints exist; `updatable = false` enforces this at the ORM level
 - **Server-side timestamp** — `timestamp` is set in the service layer; any client-supplied value is ignored
-- **Mandatory actor** — requests with a blank or missing `actor` are rejected with `400`
+- **Mandatory actor on ingest** — create-event requests with a blank or missing `actor` are rejected with `400`
 
 ### Database indexes
 

@@ -70,6 +70,16 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void search_multiActorFilter_acceptsSingleActorValue() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "login", "session", "success");
+
+        var response = search("/audit-events?actor={actor}", " user:1 ");
+
+        assertThat(response.items()).extracting(item -> item.actor()).containsExactly("user:1");
+    }
+
+    @Test
     void search_byResource_isExactAndCaseInsensitive() {
         insertEvent(
                 UUID.randomUUID(),
@@ -134,6 +144,27 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         var response = search("/audit-events?actor={actor}", " USER:1 , SVC:BATCH , user:3 ");
 
         assertThat(response.items()).extracting(item -> item.actor()).containsExactly("User:1", "svc:batch", "user:3");
+    }
+
+    @Test
+    void search_multiActorFilter_acceptsTenSuppliedActorValues() {
+        for (int index = 1; index <= 10; index++) {
+            insertEvent(
+                    UUID.randomUUID(),
+                    Instant.parse("2026-05-01T00:00:00Z").plusSeconds(index),
+                    "user:" + index,
+                    "login",
+                    "session",
+                    "success");
+        }
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T01:00:00Z"), "user:11", "login", "session", "success");
+
+        var response = search(
+                "/audit-events?actor={actor}",
+                "user:1,user:2,user:3,user:4,user:5,user:6,user:7,user:8,user:9,user:10");
+
+        assertThat(response.items()).hasSize(10);
+        assertThat(response.items()).extracting(item -> item.actor()).doesNotContain("user:11");
     }
 
     @Test
@@ -375,6 +406,59 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         assertThat(firstPage.nextCursor()).isNotBlank();
         assertThat(firstPage.items()).extracting(item -> item.actor()).containsExactly("user:2");
         assertThat(secondPage.items()).extracting(item -> item.actor()).containsExactly("user:1");
+        assertThat(secondPage.nextCursor()).isNull();
+    }
+
+    @Test
+    void search_mixedFiltersSupportStableKeysetPagination() {
+        UUID firstPageId = UUID.fromString("00000000-0000-0000-0000-000000000041");
+        UUID secondPageFirstId = UUID.fromString("00000000-0000-0000-0000-000000000042");
+        UUID secondPageSecondId = UUID.fromString("00000000-0000-0000-0000-000000000043");
+
+        insertEvent(firstPageId, Instant.parse("2026-05-02T10:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(
+                secondPageFirstId, Instant.parse("2026-05-02T09:00:00Z"), "user:2", "login", "project:1", "success");
+        insertEvent(
+                secondPageSecondId, Instant.parse("2026-05-02T08:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000044"),
+                Instant.parse("2026-05-02T07:00:00Z"),
+                "user:3",
+                "login",
+                "project:1",
+                "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000045"),
+                Instant.parse("2026-05-02T06:00:00Z"),
+                "user:1",
+                "login",
+                "project:2",
+                "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000046"),
+                Instant.parse("2026-05-03T10:00:00Z"),
+                "user:1",
+                "login",
+                "project:1",
+                "success");
+
+        var firstPage = search(
+                "/audit-events?actor={actor}&resource={resource}&from={from}&to={to}&limit=2",
+                "user:1,user:2",
+                "project:1",
+                "2026-05-02T00:00:00Z",
+                "2026-05-02T23:59:59Z");
+        var secondPage = search(
+                "/audit-events?actor={actor}&resource={resource}&from={from}&to={to}&limit=2&cursor={cursor}",
+                "user:2,user:1",
+                "project:1",
+                "2026-05-02T00:00:00Z",
+                "2026-05-02T23:59:59Z",
+                firstPage.nextCursor());
+
+        assertThat(firstPage.items()).extracting(item -> item.id()).containsExactly(firstPageId, secondPageFirstId);
+        assertThat(firstPage.nextCursor()).isNotBlank();
+        assertThat(secondPage.items()).extracting(item -> item.id()).containsExactly(secondPageSecondId);
         assertThat(secondPage.nextCursor()).isNull();
     }
 
