@@ -9,6 +9,7 @@ The endpoint must let internal users:
 - retrieve audit events within a time range
 - combine filters in a single request
 - page through large result sets safely
+- reject requests that provide an empty actor value
 - reject requests that provide more than 10 actor values in one request
 - query audit data without mutating stored events
 
@@ -21,11 +22,11 @@ As a Compliance Officer, I want to retrieve audit events for one or more actors,
 Acceptance criteria:
 
 1. Given audit events exist for multiple actors, when `actor` is provided as a comma-separated list, then only events whose actor exactly matches at least one supplied actor value are returned, using case-insensitive comparison.
-2. Given `actor` is provided with whitespace around values, when the request is executed, then leading and trailing whitespace around each supplied actor value is ignored before matching.
-3. Given `actor` contains multiple values, when the request is executed, then the actor filter is applied with logical `OR` across the supplied actor values.
+2. Given `actor` is provided with whitespace around non-empty values, when the request is executed, then leading and trailing whitespace around each supplied actor value is ignored before matching.
+3. Given `actor` contains between 1 and 10 supplied comma-separated values and each supplied value remains non-empty after trimming, when the request is executed, then the actor filter is accepted and applied with logical `OR` across the supplied actor values.
 4. Given `actor`, `resource`, `from`, or `to` are provided together, when the request is executed, then an event is returned only if it matches at least one supplied actor value and satisfies every other supplied filter.
 5. Given audit events exist for multiple resources, when `resource` is provided, then only events with the exact case-insensitive matching resource are returned.
-6. Given `actor` or `resource` is provided as an empty string, when the request is executed, then that filter is ignored.
+6. Given `resource` is provided as an empty string, when the request is executed, then that filter is ignored.
 7. Given no filters are provided, when the request is executed, then the API returns all records sorted by `timestamp` descending with `id` descending as the tie-breaker.
 8. Given `from` and `to` are provided, when the request is executed, then only events with `timestamp >= from` and `timestamp <= to` are returned.
 9. Given only `from` is provided, when the request is executed, then only events with `timestamp >= from` are returned.
@@ -53,12 +54,12 @@ Acceptance criteria:
 
 1. Given more matching records exist than fit in one page, when the client requests `limit=50` while filtering by one or more actor values, then the API returns no more than 50 events in that page.
 2. Given the client omits `limit`, when the request is executed, then the API uses the default page size of `50`.
-3. Given a client requests paginated results using `cursor`, when successive page requests are made for the same multi-actor filter set, then records are not skipped or duplicated between pages.
+3. Given a client requests paginated results using `cursor` together with `actor`, `resource`, `from`, and `to`, when successive page requests are made for the same mixed filter set, then records are not skipped or duplicated between pages.
 4. Given more matching records remain after the current page, when the request succeeds, then the response includes `nextCursor`.
 5. Given no further matching records remain after the current page, when the request succeeds, then the response omits `nextCursor`.
 6. Given multiple matching events share the same `timestamp`, when paginated results are returned for a multi-actor query, then the events are sorted by `timestamp` descending with `id` descending as the tie-breaker.
 7. Given `actor` contains repeated values, when the request is executed, then each supplied value still counts toward the maximum number of actor values allowed in one request.
-8. Given `actor` contains more than 10 comma-separated values, when the request is executed, then the API returns `422 Unprocessable Entity`.
+8. Given `actor` contains 11 comma-separated values, when the request is executed, then the API returns `422 Unprocessable Entity`.
 9. Given a cursor was issued more than one hour ago, when the request is executed, then the API returns `400 Bad Request`.
 10. Given a client provides an invalid `cursor`, when the request is executed, then the API returns `400 Bad Request`.
 11. Given a client provides an invalid `limit`, when the request is executed, then the API returns `400 Bad Request`.
@@ -79,9 +80,10 @@ Acceptance criteria:
 3. Given `from` is provided as a date without a time, when the request is executed, then the API interprets it as the start of that day in UTC.
 4. Given `to` is provided as a date without a time, when the request is executed, then the API interprets it as the inclusive end of that day in UTC.
 5. Given `from` is later than `to`, when the request is executed, then the API returns `400 Bad Request`.
-6. Given `actor` contains more than 10 comma-separated values, when the request is executed, then the API returns `422 Unprocessable Entity`.
-7. Given the request contains invalid query parameters, when validation fails, then the API does not return partial results.
-8. Given the API returns `400 Bad Request` or `422 Unprocessable Entity`, when the client inspects the response, then the body contains machine-readable `code`, a non-empty `message` string that identifies the invalid parameter or validation failure, and numeric `status` fields.
+6. Given `actor` contains an empty supplied value, including a value that becomes empty after trimming, when the request is executed, then the API returns `400 Bad Request`.
+7. Given `actor` contains more than 10 comma-separated values, when the request is executed, then the API returns `422 Unprocessable Entity`.
+8. Given the request contains invalid query parameters, when validation fails, then the API does not return partial results.
+9. Given the API returns `400 Bad Request` or `422 Unprocessable Entity`, when the client inspects the response, then the body contains machine-readable `code`, a non-empty `message` string that identifies the invalid parameter or validation failure, and numeric `status` fields.
 
 # Out of scope
 

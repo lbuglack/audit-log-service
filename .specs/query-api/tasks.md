@@ -23,11 +23,11 @@ Dependencies — `T1`
 
 DoD —
 - `actor` and `resource` filtering is implemented as exact case-insensitive matching.
-- Empty-string values for `actor` and `resource` are normalized to “not provided” instead of acting as real filters.
+- Empty-string `resource` values are normalized to “not provided”, while empty supplied `actor` values are rejected with `400 Bad Request`.
 - `from` and `to` accept approved UTC inputs, including date-only normalization to start-of-day and inclusive end-of-day behavior.
 - The query path enforces `limit` default `50`, maximum `50`, and rejects invalid values with `400 Bad Request`.
 - Invalid query input returns the approved machine-readable error body with `code`, `message`, and `status`.
-- Controller or HTTP-level integration tests cover malformed timestamps, non-UTC timestamps, invalid limits, malformed cursors, expired cursors, and `from > to`.
+- Controller or HTTP-level integration tests cover malformed timestamps, non-UTC timestamps, empty actor values, invalid limits, malformed cursors, expired cursors, and `from > to`.
 
 Size — 1 safe commit / PR
 
@@ -69,7 +69,7 @@ Refs — `requirements.md`: all sections; `design.md`: `API contract`, `Sort & d
 Dependencies — `T1`, `T2`, `T3`, `T4`
 
 DoD —
-- Integration tests cover no filters, actor-only, resource-only, case-insensitive matching, combined actor and resource, inclusive `from`/`to`, open-ended time queries, date-only inputs, empty-string filters being ignored, empty results, default limit, smaller limit, max limit, stable ordering, next-cursor progression, cursor expiry, and invalid input returning structured `400` errors.
+- Integration tests cover no filters, actor-only, resource-only, case-insensitive matching, combined actor and resource, inclusive `from`/`to`, open-ended time queries, date-only inputs, empty-string resource filters being ignored, empty results, default limit, smaller limit, max limit, stable ordering, next-cursor progression, cursor expiry, and invalid input returning structured `400` errors.
 - Existing append-only behavior remains covered, and no update/delete path is introduced by the query changes.
 - `README.md` and any query examples are updated to match the approved query contract, especially the paginated response envelope and validation behavior.
 - Consumer-facing rollout notes document the externally visible contract change from the current bare-array search response to the approved `items` plus optional `nextCursor` model.
@@ -85,10 +85,11 @@ Dependencies — `T1`, `T2`, `T3`
 
 DoD —
 - `actor` is accepted as a comma-separated query parameter and normalized by trimming whitespace around each supplied value.
-- Actor entries that become empty after trimming are ignored, and the actor filter is treated as not provided when no non-empty actor values remain.
-- Repeated supplied actor values still count toward the maximum of `10`, but duplicate normalized actor values are deduplicated before query execution.
+- Requests with exactly `1`, `3`, or `10` supplied actor values are accepted when every supplied value remains non-empty after trimming.
+- Any supplied actor value that becomes empty after trimming is rejected with a structured `400 Bad Request` response instead of being silently ignored.
+- Repeated supplied actor values still count toward the maximum of `10` before deduplication, but duplicate normalized actor values are deduplicated before query execution.
 - Multi-actor filtering applies logical `OR` across the normalized actor set and logical `AND` with any supplied `resource`, `from`, and `to` filters.
-- Requests with more than `10` supplied actor values return the approved structured `422 Unprocessable Entity` response body, while malformed or expired cursors continue to return structured `400 Bad Request` responses.
+- Requests with exactly `11` supplied actor values return the approved structured `422 Unprocessable Entity` response body, while malformed or expired cursors continue to return structured `400 Bad Request` responses.
 - Cursor handling binds each paginated traversal to the normalized filter set so later page requests with a mismatched actor set or other mismatched filters are rejected instead of silently continuing.
 
 Size — 1 safe commit / PR
@@ -104,7 +105,7 @@ DoD —
 - Seek-pagination predicates remain explicit for multi-actor queries and continue to avoid loss or duplication when multiple matching rows share the same `timestamp`.
 - A Flyway migration adds or adjusts the actor-oriented composite index so case-insensitive multi-actor retrieval can use the approved sort order without requiring a full table scan.
 - Existing resource-only and combined actor/resource query behavior remains aligned with the repository layering and append-only constraints.
-- Testcontainers-backed integration coverage exercises multi-actor queries together with resource, time-range, and shared-timestamp pagination scenarios.
+- Testcontainers-backed integration coverage exercises multi-actor queries together with the full mixed filter set of `actor`, `resource`, `from`, and `to`, plus shared-timestamp pagination scenarios.
 
 Size — 1 safe commit / PR
 
@@ -115,10 +116,11 @@ Refs — `requirements.md`: `Compliance officer`, `Security analyst`, `Validatio
 Dependencies — `T5`, `T6`, `T7`
 
 DoD —
-- Regression coverage includes multi-actor actor-only queries, multi-actor queries combined with resource and time bounds, trimming behavior, empty-after-trim actor entries being ignored, unordered actor semantics, and repeated supplied values counting toward the `10`-value maximum.
-- Regression coverage verifies deduplicated matching behavior, stable `timestamp DESC, id DESC` ordering, `nextCursor` progression across multi-actor result sets, and rejection of mismatched filter sets on cursor reuse.
-- Negative coverage verifies structured `422 Unprocessable Entity` responses for requests with more than `10` supplied actor values and structured `400 Bad Request` responses for malformed, expired, or filter-mismatched cursors without partial results.
-- `README.md` and any query examples are updated to document comma-separated actor filtering, unordered actor semantics, the `422` validation case, and the paginated `items` plus optional `nextCursor` response contract.
+- Regression coverage includes happy-path multi-actor actor-only queries with exactly `1`, `3`, and `10` supplied actor values, plus multi-actor queries combined with resource and time bounds.
+- Regression coverage verifies trimming behavior for non-empty actor values, deduplicated matching behavior, unordered actor semantics, stable `timestamp DESC, id DESC` ordering, and `nextCursor` progression across multi-actor result sets.
+- Regression coverage verifies full mixed-filter keyset pagination when `actor`, `resource`, `from`, and `to` are all supplied together, including rejection of mismatched filter sets on cursor reuse.
+- Negative coverage verifies structured `400 Bad Request` responses for empty actor values, structured `422 Unprocessable Entity` responses for requests with exactly `11` supplied actor values, and structured `400 Bad Request` responses for malformed, expired, or filter-mismatched cursors without partial results.
+- `README.md` and any query examples are updated to document comma-separated actor filtering, unordered actor semantics, the empty-actor `400` validation case, the `422` validation case for `11` supplied actor values, and the paginated `items` plus optional `nextCursor` response contract.
 - Consumer-facing rollout notes document the externally visible multi-actor query expansion and the new validation behavior.
 - `./gradlew test` passes with the multi-actor delta integrated.
 
