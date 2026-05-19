@@ -23,6 +23,10 @@ Internal append-only Audit Log service for compliance, security, and observabili
 ./gradlew bootRun --args='--spring.profiles.active=local'   # run with local profile
 ```
 
+## Command Conventions
+
+- Prefer prefixing routine shell commands with `rtk` as described in `RTK.md`
+
 ## Architecture
 
 Base package: `com.auditlog`. Five layers, each in its own package:
@@ -40,14 +44,37 @@ Base package: `com.auditlog`. Five layers, each in its own package:
 Entity→DTO mapping is done via a private `toResponse()` method in `AuditEventServiceImpl`; DTOs have no dependency on entities.
 Flyway migrations live in `src/main/resources/db/migration`.
 
+## Repo Skills
+
+- Local `spec-self-eval` skill lives at `.codex/skills/spec-self-eval/SKILL.md`
+- The same skill is mirrored for Claude at `.claude/skills/spec-self-eval/SKILL.md`
+- Use `spec-self-eval` when the user asks to self-evaluate a spec, audit implementation readiness, review spec quality, or generate an evaluation report
+
 ## Spec Rules
 
-- Specs live in `specs/<feature>/`
+- Specs live in `.specs/<feature>/`
+- A complete spec bundle contains `requirements.md`, `design.md`, and `tasks.md`
 - Specs must be written in English
 - Acceptance criteria must use EARS-style phrasing
 - Any list endpoint must define a deterministic sort order with a tie-breaker
 - Agents must ask 5-7 clarifying questions before writing a spec
 - The spec is the source of truth: if there is a gap, update the spec first and the code second
+- After changing spec files, run `spec-self-eval`
+- Save or overwrite evaluation reports at `.specs/<feature>/eval-report-YYYY-MM-DD-HH-mm.md`
+
+## Spec Checklist
+
+- Use `.specs/_ eval-checklist.md` as the primary checklist source
+- Each acceptance criterion must be testable
+- Tasks must include refs and Definition of Done
+- Pagination strategy must be justified where relevant
+- Dependencies between tasks must be explicit
+
+## Hook Awareness
+
+- If the Codex spec self-eval hook is enabled, changes under `.specs/<feature>/` may trigger automatic evaluation during the hook flow
+- Treat `FAIL` items in the generated evaluation report as blockers
+- Keep the evaluation report verdict and `FAIL` line format stable because hook parsing depends on them
 
 ## AuditEvent Model
 
@@ -75,5 +102,3 @@ Integration tests via Testcontainers are required. They must cover:
 - search by actor, resource, and time range
 
 ArchUnit tests (src/test/archunit) to check architectural approach
-
-@RTK.md
