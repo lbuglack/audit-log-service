@@ -16,6 +16,7 @@ Success response:
 
 - `200 OK`
 - Top-level response shape is a JSON object with `items` and optional `nextCursor`.
+- When no events match the filters, the response returns `items: []` and omits `nextCursor`.
 
 Success response shape:
 
