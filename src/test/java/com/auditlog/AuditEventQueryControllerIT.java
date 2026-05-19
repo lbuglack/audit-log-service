@@ -70,6 +70,16 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void search_multiActorFilter_acceptsSingleActorValue() {
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "login", "session", "success");
+
+        var response = search("/audit-events?actor={actor}", " user:1 ");
+
+        assertThat(response.items()).extracting(item -> item.actor()).containsExactly("user:1");
+    }
+
+    @Test
     void search_byResource_isExactAndCaseInsensitive() {
         insertEvent(
                 UUID.randomUUID(),
@@ -116,13 +126,64 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void search_blankActorAndResourceFiltersAreIgnored() {
+    void search_multiActorFilter_matchesAnySuppliedActorCaseInsensitively() {
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "User:1", "login", "project:1", "success");
+        insertEvent(
+                UUID.randomUUID(),
+                Instant.parse("2026-05-01T09:00:00Z"),
+                "svc:batch",
+                "logout",
+                "project:2",
+                "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T08:00:00Z"), "user:3", "logout", "project:3", "success");
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T07:00:00Z"), "user:4", "logout", "project:4", "success");
+
+        var response = search("/audit-events?actor={actor}", " USER:1 , SVC:BATCH , user:3 ");
+
+        assertThat(response.items()).extracting(item -> item.actor()).containsExactly("User:1", "svc:batch", "user:3");
+    }
+
+    @Test
+    void search_multiActorFilter_acceptsTenSuppliedActorValues() {
+        for (int index = 1; index <= 10; index++) {
+            insertEvent(
+                    UUID.randomUUID(),
+                    Instant.parse("2026-05-01T00:00:00Z").plusSeconds(index),
+                    "user:" + index,
+                    "login",
+                    "session",
+                    "success");
+        }
+        insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T01:00:00Z"), "user:11", "login", "session", "success");
+
+        var response = search(
+                "/audit-events?actor={actor}",
+                "user:1,user:2,user:3,user:4,user:5,user:6,user:7,user:8,user:9,user:10");
+
+        assertThat(response.items()).hasSize(10);
+        assertThat(response.items()).extracting(item -> item.actor()).doesNotContain("user:11");
+    }
+
+    @Test
+    void search_blankActorValueReturnsStructured400() {
+        insertEvent(
+                UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
+
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?actor={actor}", "INVALID_ACTOR", "  ");
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?actor={actor}", "INVALID_ACTOR", "user:1,,user:2");
+    }
+
+    @Test
+    void search_blankResourceFilterIsIgnored() {
         insertEvent(
                 UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "project:1", "success");
         insertEvent(
                 UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "logout", "project:2", "success");
 
-        var response = search("/audit-events?actor={actor}&resource={resource}", "  ", " ");
+        var response = search("/audit-events?resource={resource}", " ");
 
         assertThat(response.items()).hasSize(2);
     }
@@ -276,40 +337,143 @@ class AuditEventQueryControllerIT extends AbstractIntegrationTest {
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T10:00:00Z"), "user:1", "login", "session", "success");
         insertEvent(UUID.randomUUID(), Instant.parse("2026-05-01T09:00:00Z"), "user:2", "login", "session", "success");
 
-        assertInvalidQuery("/audit-events?from={from}", "INVALID_FROM", "not-a-timestamp");
-        assertInvalidQuery("/audit-events?from={from}", "INVALID_FROM", "2026-05-01T10:00:00+02:00");
-        assertInvalidQuery("/audit-events?to={to}", "INVALID_TO", "bad-to");
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?from={from}", "INVALID_FROM", "not-a-timestamp");
         assertInvalidQuery(
+                HttpStatus.BAD_REQUEST, "/audit-events?from={from}", "INVALID_FROM", "2026-05-01T10:00:00+02:00");
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?to={to}", "INVALID_TO", "bad-to");
+        assertInvalidQuery(
+                HttpStatus.BAD_REQUEST,
                 "/audit-events?from={from}&to={to}",
                 "INVALID_TIME_RANGE",
                 "2026-05-02T10:00:00Z",
                 "2026-05-01T10:00:00Z");
-        assertInvalidQuery("/audit-events?limit=0", "INVALID_LIMIT");
-        assertInvalidQuery("/audit-events?limit=51", "INVALID_LIMIT");
-        assertInvalidQuery("/audit-events?cursor={cursor}", "INVALID_CURSOR", "not-a-cursor");
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?limit=0", "INVALID_LIMIT");
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?limit=51", "INVALID_LIMIT");
+        assertInvalidQuery(HttpStatus.BAD_REQUEST, "/audit-events?cursor={cursor}", "INVALID_CURSOR", "not-a-cursor");
+        assertInvalidQuery(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "/audit-events?actor={actor}",
+                "TOO_MANY_ACTOR_VALUES",
+                "a,b,c,d,e,f,g,h,i,j,k");
 
         var validFirstPage = search("/audit-events?limit=1");
         assertInvalidQuery(
+                HttpStatus.BAD_REQUEST,
                 "/audit-events?actor={actor}&limit=1&cursor={cursor}",
                 "INVALID_CURSOR",
                 "different-user",
                 validFirstPage.nextCursor());
-        assertInvalidQuery("/audit-events?limit=2&cursor={cursor}", "INVALID_CURSOR", validFirstPage.nextCursor());
         assertInvalidQuery(
-                "/audit-events?cursor={cursor}", "INVALID_CURSOR", expireCursor(validFirstPage.nextCursor()));
+                HttpStatus.BAD_REQUEST,
+                "/audit-events?limit=2&cursor={cursor}",
+                "INVALID_CURSOR",
+                validFirstPage.nextCursor());
+        assertInvalidQuery(
+                HttpStatus.BAD_REQUEST,
+                "/audit-events?cursor={cursor}",
+                "INVALID_CURSOR",
+                expireCursor(validFirstPage.nextCursor()));
+    }
+
+    @Test
+    void search_cursorAcceptsEquivalentNormalizedActorSet() {
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000031"),
+                Instant.parse("2026-05-01T08:00:00Z"),
+                "user:1",
+                "login",
+                "session",
+                "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000032"),
+                Instant.parse("2026-05-01T09:00:00Z"),
+                "user:2",
+                "login",
+                "session",
+                "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000033"),
+                Instant.parse("2026-05-01T10:00:00Z"),
+                "user:3",
+                "login",
+                "session",
+                "success");
+
+        var firstPage = search("/audit-events?actor={actor}&limit=1", " user:1 , USER:2 , user:1 ");
+        var secondPage =
+                search("/audit-events?actor={actor}&limit=1&cursor={cursor}", "user:2,user:1", firstPage.nextCursor());
+
+        assertThat(firstPage.nextCursor()).isNotBlank();
+        assertThat(firstPage.items()).extracting(item -> item.actor()).containsExactly("user:2");
+        assertThat(secondPage.items()).extracting(item -> item.actor()).containsExactly("user:1");
+        assertThat(secondPage.nextCursor()).isNull();
+    }
+
+    @Test
+    void search_mixedFiltersSupportStableKeysetPagination() {
+        UUID firstPageId = UUID.fromString("00000000-0000-0000-0000-000000000041");
+        UUID secondPageFirstId = UUID.fromString("00000000-0000-0000-0000-000000000042");
+        UUID secondPageSecondId = UUID.fromString("00000000-0000-0000-0000-000000000043");
+
+        insertEvent(firstPageId, Instant.parse("2026-05-02T10:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(
+                secondPageFirstId, Instant.parse("2026-05-02T09:00:00Z"), "user:2", "login", "project:1", "success");
+        insertEvent(
+                secondPageSecondId, Instant.parse("2026-05-02T08:00:00Z"), "user:1", "login", "project:1", "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000044"),
+                Instant.parse("2026-05-02T07:00:00Z"),
+                "user:3",
+                "login",
+                "project:1",
+                "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000045"),
+                Instant.parse("2026-05-02T06:00:00Z"),
+                "user:1",
+                "login",
+                "project:2",
+                "success");
+        insertEvent(
+                UUID.fromString("00000000-0000-0000-0000-000000000046"),
+                Instant.parse("2026-05-03T10:00:00Z"),
+                "user:1",
+                "login",
+                "project:1",
+                "success");
+
+        var firstPage = search(
+                "/audit-events?actor={actor}&resource={resource}&from={from}&to={to}&limit=2",
+                "user:1,user:2",
+                "project:1",
+                "2026-05-02T00:00:00Z",
+                "2026-05-02T23:59:59Z");
+        var secondPage = search(
+                "/audit-events?actor={actor}&resource={resource}&from={from}&to={to}&limit=2&cursor={cursor}",
+                "user:2,user:1",
+                "project:1",
+                "2026-05-02T00:00:00Z",
+                "2026-05-02T23:59:59Z",
+                firstPage.nextCursor());
+
+        assertThat(firstPage.items()).extracting(item -> item.id()).containsExactly(firstPageId, secondPageFirstId);
+        assertThat(firstPage.nextCursor()).isNotBlank();
+        assertThat(secondPage.items()).extracting(item -> item.id()).containsExactly(secondPageSecondId);
+        assertThat(secondPage.nextCursor()).isNull();
     }
 
     private SearchAuditEventsResponse search(String path, Object... uriVariables) {
         return restTemplate.getForObject(path, SearchAuditEventsResponse.class, uriVariables);
     }
 
-    private void assertInvalidQuery(String path, String expectedCode, Object... uriVariables) {
+    private void assertInvalidQuery(
+            HttpStatus expectedStatus, String path, String expectedCode, Object... uriVariables) {
         var response = restTemplate.getForEntity(path, ApiErrorResponse.class, uriVariables);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getStatusCode()).isEqualTo(expectedStatus);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().code()).isEqualTo(expectedCode);
-        assertThat(response.getBody().status()).isEqualTo(HttpStatus.BAD_REQUEST.value());
+        assertThat(response.getBody().status()).isEqualTo(expectedStatus.value());
         assertThat(response.getBody().message()).isNotBlank();
     }
 
