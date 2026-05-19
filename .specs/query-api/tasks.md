@@ -70,6 +70,7 @@ Dependencies — `T1`, `T2`, `T3`, `T4`
 
 DoD —
 - Integration tests cover no filters, actor-only, resource-only, case-insensitive matching, combined actor and resource, inclusive `from`/`to`, open-ended time queries, date-only inputs, empty-string resource filters being ignored, empty results, default limit, smaller limit, max limit, stable ordering, next-cursor progression, cursor expiry, and invalid input returning structured `400` errors.
+- Integration tests verify that returned events preserve `context: null` when no context payload is stored and that empty-match responses use `items: []` without partial data.
 - Existing append-only behavior remains covered, and no update/delete path is introduced by the query changes.
 - `README.md` and any query examples are updated to match the approved query contract, especially the paginated response envelope and validation behavior.
 - Consumer-facing rollout notes document the externally visible contract change from the current bare-array search response to the approved `items` plus optional `nextCursor` model.
